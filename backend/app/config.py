@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     groq_transcription_model: str = 'whisper-large-v3-turbo'
     frontend_origin: str = 'http://localhost:5173'
     simulation_interval_seconds: float = 1.5
-    enable_simulator: bool = True
+    enable_simulator: bool = False
 
     @property
     def supabase_configured(self) -> bool:
