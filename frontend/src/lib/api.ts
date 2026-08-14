@@ -1,6 +1,6 @@
 import type { AlertItem, BrainConversation, BrainMessage, BrainSource, FleetItem, HealthStatus, MachineCreateInput, MachineTypePreset, Telemetry } from '../types'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {

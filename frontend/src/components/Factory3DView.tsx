@@ -1,6 +1,7 @@
-import { Component, type ReactNode, Suspense, useMemo, useRef, useState } from 'react'
-import { Canvas, type ThreeEvent, useFrame } from '@react-three/fiber'
+import { Component, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Canvas, type ThreeEvent, useFrame, useThree } from '@react-three/fiber'
 import { ContactShadows, Grid, Html, Line, OrbitControls } from '@react-three/drei'
+import * as THREE from 'three'
 import type { Group, Mesh } from 'three'
 import { Box, Download, Layers, Focus, Maximize2, MousePointer2, Rotate3D, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -86,7 +87,26 @@ function FlowMarker({ from, to, color, offset }: { from: Position3D; to: Positio
   return <mesh ref={ref}><sphereGeometry args={[.06,12,12]}/><meshBasicMaterial color={color}/></mesh>
 }
 
-function PlantScene({ fleet, selectedId, onSelect, useCad }: { fleet: FleetItem[]; selectedId: string; onSelect: (id: string) => void; useCad: boolean }) {
+const cameras = { perspective: [11,12,15] as Position3D, top: [0,22,.01] as Position3D, floor: [16,5,13] as Position3D }
+
+function CameraController({ camera, reset }: { camera: keyof typeof cameras; reset: number }) {
+  const { camera: threeCamera, controls } = useThree()
+  useEffect(() => {
+    const pos = cameras[camera]
+    threeCamera.position.set(pos[0], pos[1], pos[2])
+    threeCamera.lookAt(0, 0.5, 0)
+    threeCamera.updateProjectionMatrix()
+    if (controls) {
+      // @ts-ignore
+      controls.target?.set(0, 0.5, 0)
+      // @ts-ignore
+      controls.update?.()
+    }
+  }, [camera, reset, threeCamera, controls])
+  return null
+}
+
+function PlantScene({ fleet, selectedId, onSelect, useCad, camera, reset }: { fleet: FleetItem[]; selectedId: string; onSelect: (id: string) => void; useCad: boolean; camera: keyof typeof cameras; reset: number }) {
   const positions = useMemo(() => fleet.map(toWorld), [fleet])
   const connections = useMemo(() => {
     const rows: { from:number; to:number; utility:boolean }[] = []
@@ -98,6 +118,7 @@ function PlantScene({ fleet, selectedId, onSelect, useCad }: { fleet: FleetItem[
     return rows
   },[fleet,positions])
   return <>
+    <CameraController camera={camera} reset={reset}/>
     <color attach="background" args={['#17110d']}/><fog attach="fog" args={['#17110d',20,36]}/>
     <ambientLight intensity={1.15}/><hemisphereLight args={['#c6edf3','#0b1920',2]}/><directionalLight position={[7,12,5]} intensity={3} castShadow shadow-mapSize={[1024,1024]}/>
     <Grid args={[24,16]} position={[0,-.04,0]} cellSize={1} cellThickness={.45} cellColor="#493426" sectionSize={4} sectionThickness={.8} sectionColor="#70503a" fadeDistance={26} fadeStrength={1.5}/>
@@ -108,8 +129,6 @@ function PlantScene({ fleet, selectedId, onSelect, useCad }: { fleet: FleetItem[
     <OrbitControls makeDefault enableDamping dampingFactor={.08} minDistance={8} maxDistance={30} maxPolarAngle={Math.PI/2.12} target={[0,.5,0]}/>
   </>
 }
-
-const cameras = { perspective: [11,12,15] as Position3D, top: [0,22,.01] as Position3D, floor: [16,5,13] as Position3D }
 
 const MODEL_ASSETS = [
   { name: '2-Axis CNC SAT Model', path: '/models/2_axis_CNC.SAT', size: '29 MB', type: 'ACIS SAT (.sat)', tag: '2-Axis CNC Machine' },
@@ -147,9 +166,9 @@ export function Factory3DView({ fleet, selectedId, onSelect }: { fleet: FleetIte
     </div>
 
     <div className="real-3d-canvas">
-      <Canvas key={`${camera}-${reset}-${useCad}`} shadows dpr={[1,1.7]} camera={{position:cameras[camera],fov:45,near:.1,far:100}} onPointerMissed={()=>{}}>
+      <Canvas shadows={{ type: THREE.PCFShadowMap }} dpr={[1,1.7]} camera={{position:cameras[camera],fov:45,near:.1,far:100}} onPointerMissed={()=>{}}>
         <Suspense fallback={null}>
-          <PlantScene fleet={fleet} selectedId={selectedId} onSelect={onSelect} useCad={useCad}/>
+          <PlantScene fleet={fleet} selectedId={selectedId} onSelect={onSelect} useCad={useCad} camera={camera} reset={reset}/>
         </Suspense>
       </Canvas>
       <div className="scene-help">

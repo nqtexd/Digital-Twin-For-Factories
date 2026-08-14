@@ -95,16 +95,20 @@ async def fleet():
 
 @app.get('/api/machines/{machine_id}/history')
 async def machine_history(machine_id: str, limit: int = 120):
-    if machine_id not in simulator.states:
-        raise HTTPException(404, 'Unknown machine')
     limit = max(10, min(limit, 400))
     if repo.configured:
         try:
             data = await repo.machine_history(machine_id, limit)
             if data:
                 return data
+            # If no history is found, check if the machine actually exists in Supabase
+            machines = await repo.list_machines()
+            if any(m.get('machine_id') == machine_id for m in machines):
+                return []
         except Exception as exc:
             print(f'[api] history db fallback: {exc}')
+    if machine_id not in simulator.states:
+        raise HTTPException(404, 'Unknown machine')
     return simulator.memory_history(machine_id, limit)
 
 
