@@ -85,7 +85,9 @@ class GroqService:
                         'identify required role, tools or parts when supported by evidence; state expected telemetry '
                         'after each important change; and cite retrieved memory with [1], [2] markers. Never claim to '
                         'control or repair a machine directly. Require isolation and the company lockout/tagout procedure '
-                        'before intrusive work, and clearly label any step that needs OEM or qualified-technician approval.'
+                        'before intrusive work, and clearly label any step that needs OEM or qualified-technician approval. '
+                        'Do not use Markdown tables. Keep telemetry summaries compact, use short bullets, and use plain '
+                        'section headings without Markdown emphasis characters.'
                     ),
                 },
                 *recent_history,

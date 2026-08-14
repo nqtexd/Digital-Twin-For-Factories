@@ -12,13 +12,29 @@ const suggestions = [
 ]
 
 const guideSections = new Set(['ASSESSMENT', 'SAFETY PREREQUISITES', 'IMPLEMENTATION STEPS', 'VERIFICATION', 'ESCALATE WHEN'])
+
+function InlineMarkdown({ text }: { text: string }) {
+  return <>{text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={index}>{part.slice(1, -1)}</code>
+    return part
+  })}</>
+}
+
 function BrainAnswer({ content }: { content: string }) {
   const lines = content.split('\n')
   return <div className="message-content structured-answer">{lines.map((line,index) => {
-    const clean = line.trim(), isSection = guideSections.has(clean.replace(/[:#*]/g,'').trim().toUpperCase()), isStep = /^\d+\.\s/.test(clean)
+    const clean = line.trim()
+    const sectionName = clean.replace(/[:#*]/g,'').trim().toUpperCase()
+    const isSection = guideSections.has(sectionName)
+    const isStep = /^\d+[.)]\s/.test(clean)
+    const isBullet = /^[-*]\s+/.test(clean)
+    const isTableRow = clean.startsWith('|') && clean.endsWith('|')
     if (!clean) return <span className="answer-space" key={index}/>
-    if (isSection) return <strong className="answer-section" key={index}>{clean.replace(/[:#*]/g,'')}</strong>
-    return <span className={isStep?'answer-step':'answer-line'} key={index}>{clean}</span>
+    if (isSection) return <strong className="answer-section" key={index}>{sectionName}</strong>
+    if (isTableRow) return <span className="answer-table-row" key={index}>{clean.slice(1, -1).split('|').map((cell, cellIndex) => <span key={cellIndex}><InlineMarkdown text={cell.trim()}/></span>)}</span>
+    const text = clean.replace(/^[-*]\s+/, '')
+    return <span className={isStep ? 'answer-step' : isBullet ? 'answer-bullet' : 'answer-line'} key={index}><InlineMarkdown text={text}/></span>
   })}</div>
 }
 
@@ -43,6 +59,7 @@ export function DigitalBrain({ fleet }: { fleet: FleetItem[] }) {
   const [knowledgeBusy, setKnowledgeBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
+  const streamRef = useRef<HTMLDivElement>(null)
 
   const refreshConversations = async (preferredId?: string) => {
     const rows = await api.brainConversations()
@@ -62,7 +79,10 @@ export function DigitalBrain({ fleet }: { fleet: FleetItem[] }) {
     api.brainMessages(activeId).then(setMessages).catch(() => setNotice('Could not load this conversation.')).finally(() => setLoadingHistory(false))
   }, [activeId])
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [messages, busy])
+  useEffect(() => {
+    const stream = streamRef.current
+    if (stream) stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' })
+  }, [messages, busy, activeId])
 
   const newConversation = () => {
     setActiveId('')
@@ -149,7 +169,7 @@ export function DigitalBrain({ fleet }: { fleet: FleetItem[] }) {
             <select value={machineId || activeConversation?.machine_id || ''} onChange={(event) => setMachineId(event.target.value)} aria-label="Machine context"><option value="">Entire fleet</option>{fleet.map((item) => <option key={item.machine.machine_id} value={item.machine.machine_id}>{item.machine.display_name}</option>)}</select>
           </header>
 
-          <div className="brain-message-stream" aria-live="polite">
+          <div ref={streamRef} className="brain-message-stream" aria-live="polite">
             {!messages.length && !loadingHistory ? <div className="brain-welcome">
               <div className="welcome-knowledge-graph"><KnowledgeGraph fleet={fleet} conversations={conversations} messages={messages}/></div>
               <div><span className="eyebrow">Plant knowledge</span><h2>Search what the operation already knows.</h2><p>Current telemetry, past conversations, operator evidence, alerts, and verified procedures stay connected and traceable.</p></div>

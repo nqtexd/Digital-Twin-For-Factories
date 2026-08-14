@@ -114,6 +114,17 @@ create table if not exists public.brain_messages (
   created_at timestamptz not null default now()
 );
 
+-- Upgrade projects that already have the original Company Brain tables.
+alter table public.brain_messages add column if not exists conversation_id uuid;
+alter table public.brain_messages add column if not exists machine_id text;
+alter table public.brain_messages add column if not exists context_snapshot jsonb not null default '{}'::jsonb;
+alter table public.brain_messages add column if not exists metadata jsonb not null default '{}'::jsonb;
+alter table public.brain_messages add column if not exists created_at timestamptz not null default now();
+alter table public.brain_messages drop constraint if exists brain_messages_conversation_id_fkey;
+alter table public.brain_messages add constraint brain_messages_conversation_id_fkey foreign key (conversation_id) references public.brain_conversations(id) on delete cascade;
+alter table public.brain_messages drop constraint if exists brain_messages_machine_id_fkey;
+alter table public.brain_messages add constraint brain_messages_machine_id_fkey foreign key (machine_id) references public.machines(machine_id) on delete set null;
+
 create table if not exists public.knowledge_documents (
   id uuid primary key default gen_random_uuid(),
   title text not null,
