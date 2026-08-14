@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import json
 from typing import Any, Dict, List
 
 try:
@@ -20,6 +21,28 @@ class GroqService:
     def configured(self) -> bool:
         return self.client is not None
 
+    @staticmethod
+    def compact_context(context: Dict[str, Any]) -> Dict[str, Any]:
+        """Strip raw sensor payloads before persisting or sending an LLM prompt."""
+        fields = (
+            'machine_id', 'display_name', 'machine_type', 'line_name', 'status',
+            'temperature_c', 'vibration_rms_velocity_mm_s', 'vibration_peak_acceleration_g',
+            'load_pct', 'cycle_time_s', 'risk_score', 'risk_level', 'health_score',
+            'top_risk_factors', 'simulation_scenario', 'simulation_progress',
+        )
+        fleet = []
+        for item in (context.get('fleet') or [])[:12]:
+            machine = item.get('machine') or {}
+            telemetry = item.get('telemetry') or {}
+            combined = {**{key: machine.get(key) for key in fields if key in machine}, **{key: telemetry.get(key) for key in fields if key in telemetry}}
+            fleet.append({key: value for key, value in combined.items() if value is not None})
+        return {
+            'source': context.get('source', 'telemetry'),
+            'risk_model': context.get('risk_model', 'unknown'),
+            'retrieval_count': context.get('retrieval_count', 0),
+            'fleet': fleet,
+        }
+
     def explain(
         self,
         question: str,
@@ -33,21 +56,22 @@ class GroqService:
         if not self.client:
             return self._fallback_explanation(question, context, memories)
 
+        compact_context = self.compact_context(context)
         memory_text = '\n'.join(
-            f"[{index + 1}] {item.get('title', item.get('source_type', 'Company memory'))}: {item.get('excerpt', '')}"
-            for index, item in enumerate(memories)
+            f"[{index + 1}] {str(item.get('title', item.get('source_type', 'Company memory')))[:120]}: {str(item.get('excerpt', ''))[:700]}"
+            for index, item in enumerate(memories[:4])
         ) or 'No relevant company memory was retrieved.'
         recent_history = [
-            {'role': row.get('role', 'user'), 'content': str(row.get('content', ''))[:3000]}
-            for row in history[-8:]
+            {'role': row.get('role', 'user'), 'content': str(row.get('content', ''))[:900]}
+            for row in history[-6:]
             if row.get('role') in ('user', 'assistant')
         ]
-
-        response = self.client.chat.completions.create(
-            model=self.settings.groq_model,
-            temperature=0.2,
-            max_tokens=700,
-            messages=[
+        try:
+            response = self.client.chat.completions.create(
+                model=self.settings.groq_model,
+                temperature=0.2,
+                max_tokens=700,
+                messages=[
                 {
                     'role': 'system',
                     'content': (
@@ -65,17 +89,22 @@ class GroqService:
                     ),
                 },
                 *recent_history,
-                {
-                    'role': 'user',
-                    'content': (
-                        f"Conversation summary: {summary or 'No earlier summary.'}\n\n"
-                        f"Retrieved company memory:\n{memory_text}\n\n"
-                        f"Current plant context:\n{context}\n\nQuestion: {question}"
-                    ),
-                },
-            ],
-        )
-        return response.choices[0].message.content or 'No explanation returned.'
+                    {
+                        'role': 'user',
+                        'content': (
+                            f"Conversation summary: {summary[:1800] or 'No earlier summary.'}\n\n"
+                            f"Retrieved company memory:\n{memory_text}\n\n"
+                            f"Current plant context:\n{json.dumps(compact_context, separators=(',', ':'))}\n\n"
+                            f"Question: {question[:2000]}"
+                        ),
+                    },
+                ],
+            )
+            return response.choices[0].message.content or 'No explanation returned.'
+        except Exception as exc:
+            # A Brain request must never take down the UI due to an upstream model limit.
+            print(f'[groq] explanation fallback: {exc}')
+            return self._fallback_explanation(question, compact_context, memories)
 
     def summarize_conversation(self, messages: List[Dict[str, Any]]) -> str:
         if not messages:
@@ -83,17 +112,21 @@ class GroqService:
         if not self.client:
             snippets = [f"{row.get('role')}: {str(row.get('content', ''))[:180]}" for row in messages[-8:]]
             return ' | '.join(snippets)[:1800]
-        transcript = '\n'.join(f"{row.get('role')}: {row.get('content', '')}" for row in messages[-16:])
-        response = self.client.chat.completions.create(
-            model=self.settings.groq_model,
-            temperature=0.1,
-            max_tokens=260,
-            messages=[
-                {'role': 'system', 'content': 'Compress this manufacturing conversation into durable memory: decisions, facts, machine context, open questions, and actions. Omit small talk. Use fewer than 180 words.'},
-                {'role': 'user', 'content': transcript},
-            ],
-        )
-        return response.choices[0].message.content or ''
+        transcript = '\n'.join(f"{row.get('role')}: {str(row.get('content', ''))[:900]}" for row in messages[-12:])
+        try:
+            response = self.client.chat.completions.create(
+                model=self.settings.groq_model,
+                temperature=0.1,
+                max_tokens=260,
+                messages=[
+                    {'role': 'system', 'content': 'Compress this manufacturing conversation into durable memory: decisions, facts, machine context, open questions, and actions. Omit small talk. Use fewer than 180 words.'},
+                    {'role': 'user', 'content': transcript},
+                ],
+            )
+            return response.choices[0].message.content or ''
+        except Exception as exc:
+            print(f'[groq] summary fallback: {exc}')
+            return ' | '.join(f"{row.get('role')}: {str(row.get('content', ''))[:180]}" for row in messages[-8:])[:1800]
 
     def transcribe(self, filename: str, audio_bytes: bytes, mime_type: str) -> str:
         if not self.client:

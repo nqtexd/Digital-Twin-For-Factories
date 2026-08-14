@@ -68,6 +68,34 @@ def _local_alerts_from_snapshot(snapshot):
     return alerts
 
 
+def _slim_fleet_for_llm(snapshot):
+    """Strip bulky fields (raw_payload, vibration internals, etc.) so the
+    fleet context stays well under the Groq/LLM request-size limit."""
+    keep_telemetry_keys = {
+        'machine_id', 'machine_type', 'recorded_at', 'state', 'operation',
+        'spindle_rpm', 'temperature_c', 'temperature_rate_c_per_min',
+        'vibration_rms_velocity_mm_s', 'load_pct', 'motor_current_a',
+        'cycle_time_s', 'risk_score', 'risk_level', 'health_score',
+        'anomaly_score', 'simulation_scenario', 'simulation_progress',
+        'top_risk_factors',
+    }
+    slim = []
+    for item in snapshot:
+        machine = item.get('machine', {})
+        telemetry = item.get('telemetry') or {}
+        slim.append({
+            'machine': {
+                'machine_id': machine.get('machine_id'),
+                'display_name': machine.get('display_name'),
+                'machine_type': machine.get('machine_type'),
+                'line_name': machine.get('line_name'),
+                'status': machine.get('status'),
+            },
+            'telemetry': {k: v for k, v in telemetry.items() if k in keep_telemetry_keys} if telemetry else None,
+        })
+    return slim
+
+
 @app.get('/api/health')
 async def health() -> Dict[str, Any]:
     return {
@@ -210,7 +238,7 @@ async def ask_brain(request: BrainRequest):
     context = {
         'source': 'simulated_telemetry' if settings.enable_simulator else 'telemetry',
         'risk_model': risk_engine.model_version,
-        'fleet': snapshot,
+        'fleet': _slim_fleet_for_llm(snapshot),
         'retrieval_count': len(memories),
     }
     await repo.store_brain_message('user', request.question, machine_id, context, conversation_id)
